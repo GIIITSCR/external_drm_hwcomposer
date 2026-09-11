@@ -16,28 +16,25 @@ jobs:
       - name: Install deps
         run: |
           apt-get update
-          apt-get install -y wget git gnupg lsb-release software-properties-common \
-            lld libdrm-dev ninja-build meson pkg-config python3 rsync sudo
-
-          # Установка clang-15 из репозитория LLVM
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -
-          echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-15 main" > /etc/apt/sources.list.d/llvm.list
-          apt-get update
-          apt-get install -y clang-15 lld-15
-
-          # Симлинки, чтобы aospext_cc нашёл clang и clang++
-          ln -sf /usr/bin/clang-15 /usr/bin/clang
-          ln -sf /usr/bin/clang++-15 /usr/bin/clang++
+          apt-get install -y wget git clang-14 lld-14 libdrm-dev ninja-build meson pkg-config python3 rsync sudo
+          ln -sf /usr/bin/clang-14 /usr/bin/clang
+          ln -sf /usr/bin/clang++-14 /usr/bin/clang++
 
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          path: drm-hwcomposer-src
 
       - name: Download aospless
         run: |
           wget -q https://gitlab.freedesktop.org/drm-hwcomposer/drm-hwcomposer/uploads/28ef9379b1a0ec1ee19a17825b0f3f3f/aospless_drm_hwcomposer_arm64.tar.xz
           tar xf aospless_drm_hwcomposer_arm64.tar.xz
-          rm -rf aospless/src
-          ln -s $(pwd) aospless/src
+
+      - name: Copy sources into aospless/src
+        run: |
+          mkdir -p aospless/src
+          rsync -a --exclude='.git' --exclude='aospless' \
+            drm-hwcomposer-src/ aospless/src/
 
       - name: Build
         run: |
