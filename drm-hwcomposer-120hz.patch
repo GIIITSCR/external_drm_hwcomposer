@@ -1,0 +1,74 @@
+--- drm/DrmConnector.cpp
++++ drm/DrmConnector.cpp
+@@ -25,7 +25,11 @@
+ #include <array>
+ #include <cerrno>
+ #include <cinttypes>
++#include <cmath>
+ #include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
+ #include <sstream>
+ 
+ #include "DrmDevice.h"
+@@ -271,6 +275,59 @@
+     }
+   }
+ 
++  // Some panels (e.g. AMOLED) only advertise a single DRM mode, even though
++  // they can run at multiple refresh rates. debug.drm.mode.refresh_rates lists
++  // the rates to synthesize on top of the modes enumerated by the kernel,
++  // for example "60,90,120".
++  char refresh_rates_prop[PROPERTY_VALUE_MAX];
++  std::vector<uint32_t> refresh_rates;
++  if (property_get("debug.drm.mode.refresh_rates", refresh_rates_prop, nullptr)) {
++    char *saveptr = nullptr;
++    char *tok = strtok_r(refresh_rates_prop, ",", &saveptr);
++    while (tok != nullptr) {
++      char *end = nullptr;
++      unsigned long rate = strtoul(tok, &end, 10);
++      if (end != tok && rate > 0 && rate < 1000)
++        refresh_rates.emplace_back(static_cast<uint32_t>(rate));
++      tok = strtok_r(nullptr, ",", &saveptr);
++    }
++  }
++
++  if (!refresh_rates.empty()) {
++    size_t original_size = modes_.size();
++    for (size_t i = 0; i < original_size; ++i) {
++      const DrmMode &base = modes_[i];
++      const drmModeModeInfo raw = base.GetRawMode();
++      const double base_rate = double(base.GetVRefresh());
++
++      for (uint32_t target_rate : refresh_rates) {
++        if (std::abs(base_rate - double(target_rate)) < 0.5)
++          continue;
++
++        drmModeModeInfo m = raw;
++        m.clock = static_cast<uint32_t>(
++            std::llround(double(raw.clock) * double(target_rate) / base_rate));
++        m.vrefresh = target_rate;
++        snprintf(m.name, sizeof(m.name), "%ux%u@%u", m.hdisplay, m.vdisplay,
++                 target_rate);
++
++        bool exists = false;
++        for (const DrmMode &existing : modes_) {
++          if (existing == m) {
++            exists = true;
++            break;
++          }
++        }
++
++        if (!exists) {
++          modes_.emplace_back(&m);
++          ALOGD("add synthesized mode %dx%d@%uHz for connector %d", m.hdisplay,
++                m.vdisplay, target_rate, GetId());
++        }
++      }
++    }
++  }
++
+   return 0;
+ }
+ 
