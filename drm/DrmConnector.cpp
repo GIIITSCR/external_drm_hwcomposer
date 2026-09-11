@@ -275,6 +275,59 @@ int DrmConnector::UpdateModes() {
     }
   }
 
+  // Synthesize additional refresh rates for panels that only advertise
+  // a single DRM mode. debug.drm.mode.refresh_rates lists the rates to add,
+  // for example "60,90,120".
+  char refresh_rates_prop[PROPERTY_VALUE_MAX];
+  std::vector<uint32_t> refresh_rates;
+  if (property_get("debug.drm.mode.refresh_rates", refresh_rates_prop, nullptr)) {
+    char *saveptr = nullptr;
+    char *tok = strtok_r(refresh_rates_prop, ",", &saveptr);
+    while (tok != nullptr) {
+      char *end = nullptr;
+      unsigned long rate_val = strtoul(tok, &end, 10);
+      if (end != tok && *end == '\0' && rate_val > 0) {
+        refresh_rates.push_back(static_cast<uint32_t>(rate_val));
+      }
+      tok = strtok_r(nullptr, ",", &saveptr);
+    }
+  }
+
+  if (!refresh_rates.empty()) {
+    std::vector<DrmMode> synthesized;
+    for (const DrmMode &mode : modes_) {
+      for (uint32_t rate_val : refresh_rates) {
+        if (static_cast<uint32_t>(mode.GetVRefresh()) == rate_val) {
+          continue;
+        }
+        drmModeModeInfo info = mode.GetRawMode();
+        // Scale the pixel clock to match the target refresh rate.
+        double factor = static_cast<double>(rate_val) /
+                        static_cast<double>(mode.GetVRefresh());
+        info.clock = static_cast<uint32_t>(info.clock * factor);
+        // Adjust vertical totals to keep the same blanking.
+        info.vtotal = static_cast<uint16_t>(info.vtotal * factor);
+        DrmMode synth(&info);
+        bool dup = false;
+        for (const DrmMode &existing : modes_) {
+          if (existing == synth) {
+            dup = true;
+            break;
+          }
+        }
+        if (!dup) {
+          synthesized.push_back(synth);
+        }
+      }
+    }
+    for (const DrmMode &m : synthesized) {
+      modes_.push_back(m);
+      ALOGD("add synthesized mode %dx%d@%.1f for connector %d",
+            m.GetRawMode().hdisplay, m.GetRawMode().vdisplay,
+            m.GetVRefresh(), GetId());
+    }
+  }
+
   return 0;
 }
 
