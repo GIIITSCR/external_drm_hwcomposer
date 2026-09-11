@@ -1,0 +1,40 @@
+name: Build drm_hwcomposer .so
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04
+      options: --privileged
+
+    steps:
+      - name: Install deps
+        run: |
+          apt-get update
+          apt-get install -y wget git clang-15 lld libdrm-dev ninja-build meson pkg-config python3 rsync sudo
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download aospless
+        run: |
+          wget -q https://gitlab.freedesktop.org/drm-hwcomposer/drm-hwcomposer/uploads/28ef9379b1a0ec1ee19a17825b0f3f3f/aospless_drm_hwcomposer_arm64.tar.xz
+          tar xf aospless_drm_hwcomposer_arm64.tar.xz
+          rm -rf aospless/src
+          ln -s $(pwd) aospless/src
+
+      - name: Build
+        run: |
+          cd aospless
+          make -j$(nproc) all
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hwcomposer.drm.so
+          path: aospless/install/vendor/lib64/hw/hwcomposer.drm.so
